@@ -2,6 +2,8 @@
 <img src="imgs/theme.jpeg" alt="singularity" width="100%">
 </div>
 
+---
+
 Static recompilation of the Xbox 360 version of Singularity (2010) using rexglue-sdk.
 
 The project is fully vibecoded.
