@@ -1,9 +1,7 @@
 <div align=center>
-<img src="imgs/singularity.jpeg" alt="singularity" width="60%">
+<img src="imgs/singularity.jpeg" alt="singularity" width="100%">
 </div>
 <h2 align=center>singularit-recomp</h1>
-
-![singularity](imgs/singularity.jpeg)
 
 ### singularity-recomp 
 
