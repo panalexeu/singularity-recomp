@@ -28,3 +28,7 @@ vulkan_allow_present_mode_mailbox = false
 readback_memexport = false
 clear_memory_page_state = false
 
+# Window: windowed 1280x720 (the game's native resolution). Set fullscreen = true for borderless fullscreen.
+fullscreen = false
+window_width = 1280
+window_height = 720
