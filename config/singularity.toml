@@ -1,0 +1,30 @@
+# Singularity runtime configuration. CMake copies this file next to the executable on every
+# build (the runtime reads <exe dir>/singularity.toml). Edit this copy, not the one in out/.
+#
+# NOTE: path settings (game_data_root, user_data_root, ...) are read BEFORE this file is loaded
+# (rex_app.cpp SetupEnvironment), so pass --game_data_root on the command line.
+# GPU plugin settings (render_target_path_vulkan, ...) only work from this file, not the command line.
+
+# GPU emulation plugin (librexgpu-xenos.so next to the executable).
+gpu_plugin = "xenos"
+
+# EDRAM emulation: "fbo" = host render targets (fast), "fsi" = fragment shader interlock (accurate,
+# slow; on NVIDIA it trips the driver watchdog, Xid 109).
+render_target_path_vulkan = "fbo"
+
+# Vulkan device index from the log: 0 = NVIDIA RTX 3050, 1 = Intel Iris Xe, 2 = llvmpipe (CPU).
+# For NVIDIA, launch with __NV_PRIME_RENDER_OFFLOAD=1 __VK_LAYER_NV_optimus=NVIDIA_only.
+vulkan_device = 0
+
+# Frame lock: present the window with vsync (FIFO) at the monitor's refresh rate, e.g. 60 Hz.
+# Without this the window is redrawn as fast as possible (MangoHud showed 500-1000 "fps", all copies of
+# the same game frame). The game itself still produces ~30 new frames per second, like on the Xbox 360.
+vulkan_allow_present_mode_immediate = false
+vulkan_allow_present_mode_mailbox = false
+
+# Performance: Xenia Canary's defaults. ReXGlue defaults both to true, which makes the CPU wait for the GPU
+# after GPU particle effects (memexport) and re-check GPU-written memory every frame; Singularity's
+# burning-helicopter scene ran at ~13 fps with them, Canary at a smooth 30.
+readback_memexport = false
+clear_memory_page_state = false
+
