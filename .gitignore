@@ -11,3 +11,5 @@ CMakeUserPresets.json
 LOG.md
 # Image dumps (game data)
 *.bin
+# Game files (user-supplied, never commit)
+singularity-extract/

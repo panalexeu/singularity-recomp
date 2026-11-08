@@ -8,6 +8,9 @@ project(singularity LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Use the pinned, patched SDK submodule unless REXSDK_DIR is given (see tools/apply_patches.sh).
+set(REXSDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/rexglue-sdk" CACHE PATH "Path to rexglue-sdk source tree")
+
 include(generated/rexglue.cmake)
 
 # Sources

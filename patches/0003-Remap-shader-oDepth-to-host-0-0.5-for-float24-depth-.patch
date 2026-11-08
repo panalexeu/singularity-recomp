@@ -1,0 +1,54 @@
+From 40c0abe9284147349ebde5a2e7b7a1ca92612032 Mon Sep 17 00:00:00 2001
+From: Oleksii Horchynskyi <pan.alexeu@gmail.com>
+Date: Sun, 8 Nov 2026 12:40:35 +0200
+Subject: [PATCH 3/4] Remap shader oDepth to host [0, 0.5] for float24 depth in
+ FBO mode
+
+With a float24 depth buffer and host render targets, the viewport maps guest
+depth to host [0, 0.5] (full_float24_in_0_to_1), but depth written by pixel
+shaders (oDepth) bypasses the viewport and stayed in [0, 1]. UE3 restores scene
+depth with such a shader, so the restored depth was twice too large, and
+distant translucent geometry (Singularity's title-screen vortex and beam,
+water, explosions) failed the depth test and disappeared.
+
+Ported from Xenia Canary b15fcc73e (FBO part).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01CGstJFihyJYNUGR3QC7gUu
+---
+ .../pipeline/shader/spirv_translator_rb.cpp   | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/src/graphics/pipeline/shader/spirv_translator_rb.cpp b/src/graphics/pipeline/shader/spirv_translator_rb.cpp
+index 765c141..c2df8d3 100644
+--- a/src/graphics/pipeline/shader/spirv_translator_rb.cpp
++++ b/src/graphics/pipeline/shader/spirv_translator_rb.cpp
+@@ -1402,6 +1402,25 @@ void SpirvShaderTranslator::CompleteFragmentShaderInMain() {
+       depth = SpirvShaderTranslator::Depth20e4To32(*builder_, depth_float24, 0, true, false,
+                                                    ext_inst_glsl_std_450_);
+       builder_->createStore(depth, output_fragment_depth_);
++    } else if (current_shader().writes_depth()) {
++      // Guest oDepth is in [0, 1], but with a float24 depth buffer the host
++      // viewport maps guest depth to [0, 0.5] (full_float24_in_0_to_1, for
++      // round trips during EDRAM ownership transfers), and the viewport doesn't
++      // apply to oDepth. Remap it the same way, otherwise depth written by
++      // shaders (UE3 restores scene depth this way) is twice too large and
++      // e.g. distant translucent geometry fails the depth test against it.
++      // Ported from Xenia Canary b15fcc73e.
++      spv::Id depth = builder_->createLoad(output_fragment_depth_, spv::NoPrecision);
++      spv::Id depth_is_float24 = builder_->createBinOp(
++          spv::OpINotEqual, type_bool_,
++          builder_->createBinOp(spv::OpBitwiseAnd, type_uint_, main_system_constant_flags_,
++                                builder_->makeUintConstant(kSysFlag_DepthFloat24)),
++          const_uint_0_);
++      spv::Id depth_halved = builder_->createNoContractionBinOp(
++          spv::OpFMul, type_float_, depth, builder_->makeFloatConstant(0.5f));
++      builder_->createStore(
++          builder_->createTriOp(spv::OpSelect, type_float_, depth_is_float24, depth_halved, depth),
++          output_fragment_depth_);
+     }
+   }
+ 
+-- 
+2.43.0
+

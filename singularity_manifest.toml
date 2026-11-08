@@ -3,9 +3,9 @@
 [project]
 name = "singularity"
 sdk_version = "0.10.0"
-game_root = "../sglr-extract"
+game_root = "singularity-extract"
 
 [entrypoint]
-file_path = "../sglr-extract/default.xex"
+file_path = "singularity-extract/default.xex"
 out_directory_path = "generated/default"
 includes = ["overrides.toml"]

@@ -1,0 +1,196 @@
+From 6277f69037dc3c823982f593a71b4bb22b8fad14 Mon Sep 17 00:00:00 2001
+From: Oleksii Horchynskyi <pan.alexeu@gmail.com>
+Date: Sun, 8 Nov 2026 13:53:25 +0200
+Subject: [PATCH 4/4] Create the achievement toast only while it has something
+ to show
+
+The achievement notification dialog was created at startup and never
+destroyed. While any ImGui dialog exists, the overlay requests a window
+repaint every monitor refresh, so the window was presented at the monitor
+rate (e.g. 144 Hz) instead of only when the guest presents a frame.
+
+Now the dialog is created on the UI thread when an achievement event
+arrives, and destroyed once its last toast has faded out.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01CGstJFihyJYNUGR3QC7gUu
+---
+ include/rex/rex_app.h                         |  7 ++++
+ .../rex/ui/overlay/achievement_notification.h | 19 ++++++++++
+ include/rex/ui/overlay/achievement_toast.h    |  1 +
+ src/ui/overlay/achievement_toast.cpp          | 21 +++++++++--
+ src/ui/rex_app.cpp                            | 36 +++++++++++++------
+ 5 files changed, 70 insertions(+), 14 deletions(-)
+
+diff --git a/include/rex/rex_app.h b/include/rex/rex_app.h
+index 9672d33..c0f49ca 100644
+--- a/include/rex/rex_app.h
++++ b/include/rex/rex_app.h
+@@ -47,6 +47,10 @@ struct PathConfig {
+   std::filesystem::path config_path;
+ };
+ 
++namespace system {
++struct AchievementEvent;
++}  // namespace system
++
+ namespace ui {
+ class AchievementNotificationDialog;
+ class ConsoleDialog;
+@@ -229,6 +233,9 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::Win
+   /// built-in toast renderer. Returning nullptr disables notifications.
+   virtual std::unique_ptr<ui::AchievementNotificationDialog> CreateAchievementNotificationDialog();
+ 
++  // Creates the notification dialog on demand (UI thread) and forwards the event to it.
++  void ShowAchievementNotification(const rex::system::AchievementEvent& event);
++
+   // --- Init phase methods (called in order from OnInitialize) ---
+ 
+   /// Resolve path defaults, load config TOML, initialize logging.
+diff --git a/include/rex/ui/overlay/achievement_notification.h b/include/rex/ui/overlay/achievement_notification.h
+index f9921ed..2d9f6a3 100644
+--- a/include/rex/ui/overlay/achievement_notification.h
++++ b/include/rex/ui/overlay/achievement_notification.h
+@@ -10,6 +10,8 @@
+  */
+ #pragma once
+ 
++#include <functional>
++
+ #include <rex/system/achievement_manager.h>
+ #include <rex/ui/imgui_dialog.h>
+ 
+@@ -22,8 +24,25 @@ class AchievementNotificationDialog : public ImGuiDialog {
+   // Thread-safe implementations may receive events from guest threads.
+   virtual void Push(const rex::system::AchievementEvent& event) = 0;
+ 
++  // True when there is nothing left to show. The app creates the dialog only when a notification
++  // arrives and destroys it once idle: while any ImGui dialog exists, the window is repainted at the
++  // monitor refresh rate instead of only when the guest presents a frame.
++  virtual bool IsIdle() { return false; }
++
++  // Called on the UI thread (from Draw) when the dialog has become idle.
++  void SetOnIdle(std::function<void()> on_idle) { on_idle_ = std::move(on_idle); }
++
+  protected:
++  void NotifyIdle() {
++    if (on_idle_) {
++      on_idle_();
++    }
++  }
++
+   explicit AchievementNotificationDialog(ImGuiDrawer* drawer) : ImGuiDialog(drawer) {}
++
++ private:
++  std::function<void()> on_idle_;
+ };
+ 
+ }  // namespace rex::ui
+diff --git a/include/rex/ui/overlay/achievement_toast.h b/include/rex/ui/overlay/achievement_toast.h
+index 7642601..4a23844 100644
+--- a/include/rex/ui/overlay/achievement_toast.h
++++ b/include/rex/ui/overlay/achievement_toast.h
+@@ -34,6 +34,7 @@ class AchievementToastDialog : public AchievementNotificationDialog {
+ 
+   // Thread-safe: safe to call from any thread, including guest threads.
+   void Push(const rex::system::AchievementEvent& event) override;
++  bool IsIdle() override;
+ 
+  protected:
+   void OnDraw(ImGuiIO& io) override;
+diff --git a/src/ui/overlay/achievement_toast.cpp b/src/ui/overlay/achievement_toast.cpp
+index 53b8c0b..3fbc478 100644
+--- a/src/ui/overlay/achievement_toast.cpp
++++ b/src/ui/overlay/achievement_toast.cpp
+@@ -29,6 +29,18 @@ void AchievementToastDialog::Push(const rex::system::AchievementEvent& event) {
+   queue_.push_back({event, std::chrono::steady_clock::now()});
+ }
+ 
++bool AchievementToastDialog::IsIdle() {
++  std::lock_guard<std::mutex> lock(mutex_);
++  if (queue_.empty()) {
++    return true;
++  }
++  // The last toast has finished fading out but OnDraw hasn't popped it yet.
++  const PendingToast& last = queue_.back();
++  return queue_.size() == 1 && last.visible_since &&
++         std::chrono::steady_clock::now() - *last.visible_since >=
++             std::chrono::duration<float>(kDisplaySeconds);
++}
++
+ void AchievementToastDialog::OnDraw(ImGuiIO& io) {
+   auto now = std::chrono::steady_clock::now();
+ 
+@@ -47,10 +59,13 @@ void AchievementToastDialog::OnDraw(ImGuiIO& io) {
+         break;
+       }
+     }
+-    if (queue_.empty()) {
+-      return;
++    if (!queue_.empty()) {
++      toast = queue_.front();
+     }
+-    toast = queue_.front();
++  }
++  if (!toast.visible_since) {
++    NotifyIdle();
++    return;
+   }
+ 
+   float alpha = 1.0f;
+diff --git a/src/ui/rex_app.cpp b/src/ui/rex_app.cpp
+index 9ff54e8..680d437 100644
+--- a/src/ui/rex_app.cpp
++++ b/src/ui/rex_app.cpp
+@@ -454,23 +454,37 @@ void ReXApp::SetupOverlays(rex::ui::Presenter* presenter, rex::ui::ImmediateDraw
+   OnCreateDialogs(imgui_drawer_.get());
+ }
+ 
++void ReXApp::ShowAchievementNotification(const rex::system::AchievementEvent& event) {
++  if (!achievement_notification_) {
++    achievement_notification_ =
++        std::shared_ptr<ui::AchievementNotificationDialog>(CreateAchievementNotificationDialog());
++    if (!achievement_notification_) {
++      return;
++    }
++    // Destroy it outside its own Draw once the last toast has faded out.
++    achievement_notification_->SetOnIdle([this]() {
++      app_context().CallInUIThreadDeferred([this]() {
++        if (achievement_notification_ && achievement_notification_->IsIdle()) {
++          achievement_notification_.reset();
++        }
++      });
++    });
++  }
++  achievement_notification_->Push(event);
++}
++
+ void ReXApp::LaunchModule() {
+   app_context().CallInUIThreadDeferred([this]() {
+     // Register the achievement notification callback now that the runtime and
+     // KernelState are guaranteed to exist. Done here (not OnCreateDialogs)
+     // because KernelState is null during SetupPresentation.
+-    if (!achievement_notification_) {
+-      achievement_notification_ =
+-          std::shared_ptr<ui::AchievementNotificationDialog>(CreateAchievementNotificationDialog());
+-    }
+-    if (achievement_notification_ && achievement_notification_listener_ == 0 && runtime_ &&
+-        runtime_->kernel_state()) {
+-      std::weak_ptr<ui::AchievementNotificationDialog> notification = achievement_notification_;
++    // The notification dialog is created only when an achievement event arrives and destroyed once
++    // it's idle: while any ImGui dialog exists, the window is repainted every monitor refresh (e.g.
++    // 144 Hz) instead of only when the guest presents a new frame.
++    if (achievement_notification_listener_ == 0 && runtime_ && runtime_->kernel_state()) {
+       achievement_notification_listener_ = achievements().RegisterNotificationCallback(
+-          [notification](const rex::system::AchievementEvent& event) {
+-            if (auto dialog = notification.lock()) {
+-              dialog->Push(event);
+-            }
++          [this](const rex::system::AchievementEvent& event) {
++            app_context().CallInUIThread([this, event]() { ShowAchievementNotification(event); });
+           });
+     }
+ 
+-- 
+2.43.0
+

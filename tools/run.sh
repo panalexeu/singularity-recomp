@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Launch Singularity (source-built SDK build) on the NVIDIA GPU.
+# Launch Singularity (patched SDK build) on the NVIDIA GPU.
 #
 #   tools/run.sh [extra runtime args...]
 #   SINGULARITY_BUILD=local-release tools/run.sh     # use another build preset folder
@@ -9,8 +9,8 @@
 # with SIGBUS ("Bus error") while touching guest memory. Remove segments no process has open.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
-build="${SINGULARITY_BUILD:-local-src-release}"
-game="${SINGULARITY_GAME_ROOT:-$root/../sglr-extract}"
+build="${SINGULARITY_BUILD:-linux-amd64-release}"
+game="${SINGULARITY_GAME_ROOT:-$root/singularity-extract}"
 
 for seg in /dev/shm/xenia_memory_*; do
   [ -e "$seg" ] || continue

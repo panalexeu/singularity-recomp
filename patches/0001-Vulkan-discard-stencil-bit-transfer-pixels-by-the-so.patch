@@ -1,0 +1,32 @@
+From ce9ac38b7371cd80eadda6c736b5e43c8a2b6df1 Mon Sep 17 00:00:00 2001
+From: Oleksii Horchynskyi <oleksahorch@gmail.com>
+Date: Sat, 7 Nov 2026 12:52:11 +0200
+Subject: [PATCH 1/4] Vulkan: discard stencil bit transfer pixels by the source
+ stencil
+
+Without VK_EXT_shader_stencil_export (e.g. NVIDIA), stencil is transferred one bit per draw, discarding pixels whose bit is 0. "packed" was never set for stencil bit output, so nothing was discarded and every transfer draw incremented stencil until it saturated at 0xFF. Ported from xenia-canary 24f90c0ef (2025-12-22).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01CGstJFihyJYNUGR3QC7gUu
+---
+ src/graphics/vulkan/render_target_cache.cpp | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/graphics/vulkan/render_target_cache.cpp b/src/graphics/vulkan/render_target_cache.cpp
+index 0298f06..c333b2d 100644
+--- a/src/graphics/vulkan/render_target_cache.cpp
++++ b/src/graphics/vulkan/render_target_cache.cpp
+@@ -3734,6 +3734,10 @@ VkShaderModule VulkanRenderTargetCache::GetTransferShader(TransferShaderKey key)
+         }
+       }
+     }
++    // For stencil bit output, use stencil directly for the discard check.
++    if (packed == spv::NoResult && mode.output == TransferOutput::kStencilBit) {
++      packed = source_stencil[0];
++    }
+     switch (mode.output) {
+       case TransferOutput::kColor: {
+         // Unless a special path was taken, unpack the raw 32bpp value into the
+-- 
+2.43.0
+
