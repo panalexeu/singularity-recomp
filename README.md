@@ -1,7 +1,6 @@
 <div align=center>
 <img src="imgs/theme.jpeg" alt="singularity" width="100%">
 </div>
-<h2 align=center>singularit-recomp</h1>
 
 Static recompilation of the Xbox 360 version of Singularity (2010) using rexglue-sdk.
 
